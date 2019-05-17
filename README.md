@@ -186,3 +186,4 @@ Create a symbolic link to spectool where your search PATH can find it.
 ```
 ln -s ~/gitrepos/spectool/spectool ~/bin/
 ```
+Fri May 17 11:36:02 EEST 2019
