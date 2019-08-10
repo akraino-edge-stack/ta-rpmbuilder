@@ -39,6 +39,10 @@ class Project(object):
 
     """ Instance of a project """
 
+    version_macro = '%{_version}'
+    commit_count_macro = '%{_commit_count}'
+    commit_hash_macro = '%{_commit_hash}'
+
     def __init__(self, name, workspace, projects, builders, packagebuilder, chrootscrub=True, nosrpm=False):
         self.name = name
 
@@ -130,18 +134,11 @@ class Project(object):
         assert not self.built[mockroot], "Project already built"
 
         # Produce spec file
-        if self.spec.version == '%{_version}':
+        if self.spec.version == self.version_macro:
             self.logger.debug("patching spec file")
             self.logger.debug("Version in spec is going to be %s", self.useversion)
 
-            rpm = Repotool()
-            userelease = rpm.next_release_of_package(
-                os.path.join(self.directory_of_commonrepo,
-                             self.builders.roots[0],
-                             "rpm"),
-                self.spec.name,
-                self.useversion,
-                self.spec.release)
+            userelease = self._get_package_release()
             self.logger.debug("Release in spec is going to be %s", userelease)
 
             specfile = self.packagebuilder.patch_specfile(self.spec.specfilefullpath,
@@ -182,6 +179,16 @@ class Project(object):
         # We wipe buildroot of previously built rpm, source etc. packages
         # This is custom cleaning which does not remove chroot
         self.packagebuilder.mock_wipe_buildroot(self.project_workspace, self.directory_of_builder, mockroot)
+
+    def _get_package_release(self):
+        rpm = Repotool()
+        return rpm.next_release_of_package(
+            os.path.join(self.directory_of_commonrepo,
+                         self.builders.roots[0],
+                         "rpm"),
+            self.spec.name,
+            self.useversion,
+            self.spec.release)
 
     def pull_source_packages(self, target_dir):
         cmd = ['/usr/bin/spectool', '-d', 'KVERSION a.b', '-g', '--directory', target_dir, self.spec.specfilefullpath]
@@ -228,7 +235,6 @@ class Project(object):
             else:
                 raise ProjectError("Spec file lists patch \"%s\" but no file found" % patch_file_hit)
         return source_package_list
-
 
     def get_source_rpm(self, hostsourcedir, specfile, mockroot):
         return self.packagebuilder.mock_source_rpm(hostsourcedir,
@@ -306,7 +312,6 @@ class Project(object):
         # Store info of latest build
         self.store_project_status()
 
-
     def who_buildrequires_me(self):
         """
         Return a list of projects which directly buildrequires this project (non-recursive)
@@ -323,7 +328,6 @@ class Project(object):
                     self.projects[self.name].buildrequires_downstream.add(project)
                     downstream_projects.add(project)
         return downstream_projects
-
 
     def who_requires_me(self, recursive=False, depth=0):
         """
@@ -373,6 +377,14 @@ class Project(object):
                     raise
         return True
 
+    def _template_git_macros(self, text):
+        templated_text = text
+        for macro in self.git_macros:
+            if macro[0] in templated_text:
+                templated_text = templated_text.replace(macro[0], macro[1]())
+        return templated_text
+
+
 class LocalMountProject(Project):
     """ Projects coming from local disk mount """
     def __init__(self, name, directory, workspace, projects, builders, packagebuilder, masterargs, spec_path):
@@ -387,6 +399,11 @@ class LocalMountProject(Project):
             raise ProjectError("No directory %s found", directory)
 
         self.vcs = VersionControlSystem(directory)
+        self.git_macros = (
+            (self.commit_count_macro, self.vcs.get_git_commit_count),
+            (self.commit_hash_macro,  self.vcs.get_git_commit_hash)
+        )
+
         self.directory_of_checkout = directory
 
         # Values from build configuration file
@@ -408,7 +425,7 @@ class LocalMountProject(Project):
         except:
             raise
 
-        if self.spec.version == '%{_version}':
+        if self.spec.version == self.version_macro:
             if self.gitversioned:
                 self.logger.debug("Using Git describe for package version")
                 self.useversion = citag
@@ -470,6 +487,13 @@ class LocalMountProject(Project):
             with open(statusfile, 'w') as outfile:
                 json.dump(projectstatus, outfile)
 
+    def _get_package_release(self):
+        if self.gitversioned:
+            return self._template_git_macros(self.spec.release)
+        else:
+            super(GitProject, self)._get_package_release()
+
+
 class GitProject(Project):
     """ Projects cloned from Git version control system """
     def __init__(self, name, workspace, conf, projects, builders, packagebuilder, masterargs):
@@ -491,6 +515,11 @@ class GitProject(Project):
         self.vcs.update_git_project(self.projconf["url"], self.projconf["ref"])
         self.useversion = self.vcs.get_citag()
 
+        self.git_macros = (
+            (self.commit_count_macro, self.vcs.get_git_commit_count),
+            (self.commit_hash_macro,  self.vcs.get_git_commit_hash)
+        )
+
         # Read spec
         try:
             self.spec = Specworker(self.directory_of_checkout,
@@ -500,7 +529,7 @@ class GitProject(Project):
             self.centos_style = True
 
         # Define what version shall be used in spec file
-        if self.spec.version == '%{_version}':
+        if self.spec.version == self.version_macro:
             self.packageversion = self.vcs.get_citag()
             self.logger.debug("Taking package version from VCS")
         else:
@@ -554,6 +583,14 @@ class GitProject(Project):
 
         with open(statusfile, 'w') as outfile:
             json.dump(projectstatus, outfile)
+
+    def _get_package_release(self):
+        templated_release = self._template_git_macros(self.spec.release)
+        if templated_release != self.spec.release:
+            return templated_release
+        else:
+            return super(GitProject, self)._get_package_release()
+
 
 class ProjectError(RpmbuilderError):
 

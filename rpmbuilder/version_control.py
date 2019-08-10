@@ -187,10 +187,8 @@ class VersionControlSystem(object):
                 citag = describe
         except:
             try:
-                count = self.__run_git(["git", "rev-list", "HEAD", "--count"],
-                                       self.clone_target_dir).strip()
-                sha = self.__run_git(["git", "describe", "--long", "--always"],
-                                     self.clone_target_dir).strip()
+                count = self.get_git_commit_count()
+                sha = self.get_git_commit_hash()
                 citag = 'c{}.g{}'.format(count, sha)
             except:
                 raise VcsError("Could not create a name for the package with git describe")
@@ -198,6 +196,14 @@ class VersionControlSystem(object):
         if re.search("-", citag):
             citag = re.sub('-', '.', citag)
         return citag
+
+    def get_git_commit_count(self):
+        return self.__run_git(["git", "rev-list", "HEAD", "--count"],
+                              self.clone_target_dir).strip()
+
+    def get_git_commit_hash(self):
+        return self.__run_git(["git", "rev-parse", "--short", "HEAD"],
+                              self.clone_target_dir).strip()
 
 
 class VcsError(RpmbuilderError):
