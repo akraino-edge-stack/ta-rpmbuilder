@@ -271,6 +271,10 @@ class Repotool(object):
                             latest_found_release = rpmrelease
         if latest_found_release == 0:
             self.logger.debug("Did not find any previous releases of %s", package)
+            # try to use Jenkins BUILD_NUMBER
+            if "BUILD_NUMBER" in os.environ:
+                # next_release_of_package function will increment this release number
+                latest_found_release = int(os.environ["BUILD_NUMBER"]) - 1
         return str(latest_found_release)
 
     def next_release_of_package(self, directory, package, version, oldrelease):

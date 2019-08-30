@@ -39,6 +39,8 @@ class Project(object):
 
     """ Instance of a project """
 
+    version_macro = '%{_version}'
+
     def __init__(self, name, workspace, projects, builders, packagebuilder, chrootscrub=True, nosrpm=False):
         self.name = name
 
@@ -130,7 +132,7 @@ class Project(object):
         assert not self.built[mockroot], "Project already built"
 
         # Produce spec file
-        if self.spec.version == '%{_version}':
+        if self.useversion != self.spec.version:
             self.logger.debug("patching spec file")
             self.logger.debug("Version in spec is going to be %s", self.useversion)
 
@@ -183,6 +185,10 @@ class Project(object):
         # This is custom cleaning which does not remove chroot
         self.packagebuilder.mock_wipe_buildroot(self.project_workspace, self.directory_of_builder, mockroot)
 
+    def _template_version_macro(self, version):
+        return self.spec.version.replace(
+            self.version_macro, version).strip()
+
     def pull_source_packages(self, target_dir):
         cmd = ['/usr/bin/spectool', '-d', 'KVERSION a.b', '-g', '--directory', target_dir, self.spec.specfilefullpath]
         self.logger.info('Pulling source packages: %s', cmd)
@@ -192,7 +198,7 @@ class Project(object):
         except OSError as err:
             self.logger.info('Pulling source packages nok %s', err.strerror)
             raise RepotoolError("Calling of command spectool caused: \"%s\"" % err.strerror)
-        except:
+        except Exception as err:
             self.logger.info('Pulling source packages nok ??', err.strerror)
             raise RepotoolError("There was error pulling source content")
 
@@ -228,7 +234,6 @@ class Project(object):
             else:
                 raise ProjectError("Spec file lists patch \"%s\" but no file found" % patch_file_hit)
         return source_package_list
-
 
     def get_source_rpm(self, hostsourcedir, specfile, mockroot):
         return self.packagebuilder.mock_source_rpm(hostsourcedir,
@@ -306,7 +311,6 @@ class Project(object):
         # Store info of latest build
         self.store_project_status()
 
-
     def who_buildrequires_me(self):
         """
         Return a list of projects which directly buildrequires this project (non-recursive)
@@ -323,7 +327,6 @@ class Project(object):
                     self.projects[self.name].buildrequires_downstream.add(project)
                     downstream_projects.add(project)
         return downstream_projects
-
 
     def who_requires_me(self, recursive=False, depth=0):
         """
@@ -373,6 +376,7 @@ class Project(object):
                     raise
         return True
 
+
 class LocalMountProject(Project):
     """ Projects coming from local disk mount """
     def __init__(self, name, directory, workspace, projects, builders, packagebuilder, masterargs, spec_path):
@@ -408,13 +412,19 @@ class LocalMountProject(Project):
         except:
             raise
 
-        if self.spec.version == '%{_version}':
-            if self.gitversioned:
+        if self.version_macro in self.spec.version:
+            if not self.gitversioned:
+                self.logger.debug("Project not from Git. Using a.b package version")
+                self.useversion = 'a.b'
+            if self.spec.version == self.version_macro:
                 self.logger.debug("Using Git describe for package version")
                 self.useversion = citag
             else:
-                self.logger.debug("Project not from Git. Using a.b package version")
-                self.useversion = 'a.b'
+                project_version = self._template_version_macro(citag)
+                self.logger.debug("Using Git describe for {} in package version"
+                                  .format(project_version))
+                self.useversion = project_version
+
         else:
             self.logger.debug("Using spec definition for package version")
             self.useversion = self.spec.version
@@ -470,6 +480,7 @@ class LocalMountProject(Project):
             with open(statusfile, 'w') as outfile:
                 json.dump(projectstatus, outfile)
 
+
 class GitProject(Project):
     """ Projects cloned from Git version control system """
     def __init__(self, name, workspace, conf, projects, builders, packagebuilder, masterargs):
@@ -501,11 +512,15 @@ class GitProject(Project):
 
         # Define what version shall be used in spec file
         if self.spec.version == '%{_version}':
-            self.packageversion = self.vcs.get_citag()
+            self.useversion = self.vcs.get_citag()
             self.logger.debug("Taking package version from VCS")
+        elif self.version_macro in self.spec.version:
+            self.useversion = self._template_version_macro(self.vcs.get_citag())
+            self.logger.debug("Templating package version macro from VCS")
         else:
-            self.packageversion = self.spec.version
+            self.useversion = self.spec.version
             self.logger.debug("Taking package version from spec")
+        self.useversion = self.packageversion
         self.logger.debug("Package version: %s", self.packageversion)
 
         self.project_changed = self.get_project_changed()
@@ -554,6 +569,7 @@ class GitProject(Project):
 
         with open(statusfile, 'w') as outfile:
             json.dump(projectstatus, outfile)
+
 
 class ProjectError(RpmbuilderError):
 
