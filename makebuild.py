@@ -21,7 +21,6 @@ import argparse
 import logging
 import os
 import platform
-import random
 import re
 import shutil
 import sys
@@ -193,7 +192,7 @@ class Build(object):
                 projects_to_rebuild.extend(need_rebuild)
             buildlist.extend(projects_to_rebuild)
         buildlist = list(set(buildlist))
-        random.shuffle(buildlist)
+        buildlist.sort()
         return buildlist
 
     def mock_projects(self, build_list):
@@ -240,11 +239,14 @@ class Build(object):
                 self.logger.debug("Trying to build: {}".format(project))
                 self.logger.debug("Build list: {}".format(build_list))
                 if not self.upstream_packages_in_buildlist(project, build_list):
-                    self.projects[project].resolve_dependencies(mockroot)
-                    self.logger.debug("OK to build {}".format(project))
-                    self.projects[project].build_project(mockroot)
-                    something_was_built = True
-                    self.packagebuilder.update_local_repository(self.builder.get_configdir(), mockroot)
+                    if not self.projects[project].resolve_dependencies(mockroot):
+                        self.logger.info("still unresolved dependencies: {}".format(project))
+                        not_built.append(project)
+                    else:
+                        self.logger.debug("OK to build {}".format(project))
+                        self.projects[project].build_project(mockroot)
+                        something_was_built = True
+                        self.packagebuilder.update_local_repository(self.builder.get_configdir(), mockroot)
                 else:
                     self.logger.debug("Skipping {} because upstream is not built yet".format(project))
                     not_built.append(project)

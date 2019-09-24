@@ -128,10 +128,10 @@ class Specworker(object):
                             'Failed to parse %global macro "{}" (error: {})'.format(linestripped,
                                                                                     str(err)))
 
-                elif linestripped.lower().startswith("buildrequires:"):
+                elif linestripped.lower().startswith("buildrequires:") and "only_builddep_resolve" not in self.spec_globals:
                     self.buildrequires.extend(self.__get_value_from_line(linestripped))
 
-                elif linestripped.lower().startswith("requires:"):
+                elif linestripped.lower().startswith("requires:") and "only_builddep_resolve" not in self.spec_globals:
                     self.requires.extend(self.__get_value_from_line(linestripped))
 
                 elif linestripped.lower().startswith("release:"):
